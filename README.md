@@ -97,6 +97,8 @@ python -m unittest -v
 **Dynamic rerouting:** the route changes when conditions or road closures change
 ![Dynamic rerouting](screenshots/05-dynamic-rerouting.png)
 
+📄 [Hackathon presentation](docs/Urban_Disaster_Risk_Evacuation_Hackathon.pptx)
+
 ## Limitations
 
 - Uses sample city data. No live weather, water-level or traffic feeds.
