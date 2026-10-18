@@ -1,0 +1,149 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Urban Disaster Risk Prediction &amp; Dynamic Evacuation System</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+<style>
+:root{--bg:#0e1a24;--panel:#13242f;--ink:#e8efe9;--mute:#8da3ad;--line:#244050;--low:#3ecf8e;--med:#f5b942;--high:#ff5a4d;--route:#4cc9f0}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,sans-serif;display:grid;grid-template-columns:1fr 410px;grid-template-rows:auto 1fr}
+header{grid-column:1/3;padding:10px 18px;border-bottom:1px solid var(--line);display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+h1{font:800 19px Georgia,serif;margin:0;letter-spacing:.2px}h1 small{font:400 13px system-ui;color:var(--mute);margin-left:8px}
+#alert{flex:1;min-width:240px;padding:6px 12px;border-radius:6px;font-weight:600;background:#14382b;color:var(--low)}
+#alert.on{background:var(--high);color:#2a0502;animation:pulse 1.4s infinite}
+@keyframes pulse{50%{opacity:.72}}@media(prefers-reduced-motion:reduce){#alert.on{animation:none}}
+#map{height:100%;min-height:420px}
+aside{background:var(--panel);overflow:auto;padding:14px;border-left:1px solid var(--line)}
+.ctl label{display:flex;justify-content:space-between;color:var(--mute);margin-top:8px}
+input[type=range]{width:100%;accent-color:var(--route)}
+button{background:var(--route);color:#04222c;border:0;border-radius:5px;padding:6px 12px;font-weight:600;cursor:pointer;margin:8px 6px 0 0}
+button.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}button:focus-visible,input:focus-visible,tr:focus-visible{outline:2px solid var(--route)}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:14px 0}
+.kpis div{border-left:3px solid var(--line);padding-left:8px}.kpis b{font:800 24px Georgia,serif;display:block}.kpis span{color:var(--mute);font-size:12px}
+h3{font:600 15px Georgia,serif;margin:16px 0 6px}
+table{width:100%;border-collapse:collapse}td,th{padding:5px 4px;border-bottom:1px solid var(--line);text-align:left;font-size:13px}tr[data-z]{cursor:pointer}tr.sel{background:#1c3a4a}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px}
+.bar{height:6px;background:var(--route);border-radius:3px}.row{display:grid;grid-template-columns:110px 1fr 40px;gap:8px;align-items:center;font-size:12px;color:var(--mute);margin:3px 0}
+.charts{display:grid;grid-template-columns:1fr 1.4fr;gap:10px}canvas{max-height:150px}
+.pin{font-size:20px;filter:drop-shadow(0 1px 2px #000)}.pin.bad{filter:grayscale(1) drop-shadow(0 0 4px var(--high));opacity:.7}
+#notes{margin:12px 0 0;padding:0;list-style:none}#notes li{border-left:3px solid var(--med);background:#1a2f3b;padding:5px 8px;margin-bottom:4px;font-size:13px}
+.legend{display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:var(--mute);margin:10px 0 6px;padding:6px 8px;background:#10222e;border-radius:4px;border:1px solid var(--line)}
+.legend span{display:flex;align-items:center}
+#route{background:#10222e;border:1px solid var(--line);border-radius:6px;padding:10px;font-size:13px;line-height:1.45;word-break:break-word}
+.ml-info{background:#11222c;border:1px solid var(--line);border-radius:6px;padding:10px;margin-top:10px;font-size:12px;color:var(--mute);line-height:1.45}
+.ml-info b{color:var(--ink)}
+.ml-tag{display:inline-block;background:#1a3a4a;color:var(--route);padding:2px 6px;border-radius:4px;font-weight:600;font-size:11px;margin-bottom:6px}
+.foot{color:var(--mute);font-size:12px;margin-top:14px}
+@media(max-width:860px){body{grid-template-columns:1fr;grid-template-rows:auto 50vh auto}header{grid-column:1}aside{border-left:0}.kpis{grid-template-columns:repeat(2,1fr)}}
+</style></head><body>
+<header><h1>Urban Disaster Risk Prediction &amp; Dynamic Evacuation System<small>AI-powered flood risk prediction &amp; evacuation command dashboard</small></h1><div id="alert" role="alert"></div></header>
+<div id="map"></div>
+<aside>
+<div class="ctl">
+ <label>Storm intensity <b id="rv">1.00×</b></label><input id="rain" type="range" min=".5" max="2" step=".01" value="1">
+ <label>Road-closure threshold <b id="tv">0.70</b></label><input id="thr" type="range" min=".4" max=".95" step=".01" value=".7">
+ <button id="play">▶ Storm time-lapse</button><button class="alt" id="clear">Reopen manual closures</button>
+ <p style="color:var(--mute);margin:8px 0 0;font-size:12px">Click any road on the map to close or reopen it. Routes recompute instantly. Alerts fire when a zone scores 0.65 or more.</p>
+</div>
+<ul id="notes"></ul>
+<div class="kpis" id="kpis"></div>
+<div class="charts"><canvas id="c1"></canvas><canvas id="c2"></canvas></div>
+<h3>Recommended evacuation route</h3><div id="route">Select a zone.</div>
+<h3>Zones (click to inspect)</h3>
+<div class="legend">
+ <span><span class="dot" style="background:var(--high)"></span>High Risk (&ge;0.65)</span>
+ <span><span class="dot" style="background:var(--med)"></span>Medium Risk (0.35–0.65)</span>
+ <span><span class="dot" style="background:var(--low)"></span>Lower Predicted Risk (&lt;0.35)</span>
+</div>
+<table id="zt"></table>
+<h3>Why this risk? <span id="zn" style="color:var(--mute);font-weight:400"></span></h3><div id="why"></div>
+<h3>Shelters</h3><table id="st"></table>
+<h3>ML Model &amp; Dataset Transparency</h3><div class="ml-info" id="ml-info"></div>
+<p class="foot" id="foot"></p>
+</aside>
+<script>
+const C={Low:'#3ecf8e',Medium:'#f5b942',High:'#ff5a4d'},manual=new Set();let S,sel=null,busy=false,again=false,timer=null;
+const $=id=>document.getElementById(id);
+const map=L.map('map').setView([13.027,80.215],13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);
+const G=L.layerGroup().addTo(map);
+const charts={c1:new Chart($('c1'),{type:'doughnut',data:{labels:['High','Medium','Lower Risk'],datasets:[{data:[0,0,0],backgroundColor:[C.High,C.Medium,C.Low],borderWidth:0}]},options:{plugins:{legend:{labels:{color:'#8da3ad',boxWidth:10}},title:{display:true,text:'Zones by risk level',color:'#e8efe9'}}}}),
+c2:new Chart($('c2'),{type:'bar',data:{labels:[],datasets:[{label:'Shelter fill %',data:[],backgroundColor:'#4cc9f0'}]},options:{scales:{y:{max:100,ticks:{color:'#8da3ad'}},x:{ticks:{color:'#8da3ad'}}},plugins:{legend:{display:false},title:{display:true,text:'Shelter fill %',color:'#e8efe9'}}}})};
+async function load(){
+ if(busy){again=true;return}   // remember changes made while a request is running
+ busy=true;
+ $('rv').textContent=(+$('rain').value).toFixed(2)+'×';$('tv').textContent=(+$('thr').value).toFixed(2);
+ const q=new URLSearchParams({rain:$('rain').value,thr:$('thr').value,blocked:[...manual].join(',')});
+ try{S=await (await fetch('/api/state?'+q)).json();}
+ catch(e){$('alert').className='on';$('alert').textContent='Cannot reach the server. Is app.py running?';busy=false;return}
+ finally{busy=false}
+ if(!sel||!S.zones.find(z=>z.id===sel))sel=S.alerts.length?S.alerts[0].id:S.zones[0].id;
+ draw();
+ if(again){again=false;load()}
+}
+function draw(){
+ G.clearLayers();const Z=Object.fromEntries(S.zones.map(z=>[z.id,z]));
+ S.roads.forEach(r=>{const l=L.polyline(r.coords,r.blocked?{color:C.High,weight:5,dashArray:'6 8'}:{color:'#6b8794',weight:3}).addTo(G);
+  l.bindTooltip(`${r.id} · ${r.blocked?'BLOCKED – '+r.reason:'open'} (${r.km} km). Click to ${manual.has(r.id)?'reopen':'close'}`);
+  l.on('click',()=>{manual.has(r.id)?manual.delete(r.id):manual.add(r.id);load()})});
+ S.zones.forEach(z=>{L.circle([z.lat,z.lng],{radius:620,color:C[z.level],fillColor:C[z.level],fillOpacity:z.id===sel?.5:.28,weight:z.id===sel?4:1.5}).addTo(G)
+  .bindTooltip(`<b>${z.name}</b><br>${z.level==='Low'?'Lower predicted risk':z.level+' risk'} (${z.score})<br>Rain ${z.rain_now} mm · Water ${z.water_now} m<br>Elevation ${z.elev} m · Pop ${z.pop}`).on('click',()=>{sel=z.id;draw()})});
+ const rt=S.routes[sel];
+ Object.entries(S.routes).forEach(([id,r])=>{if(id!==sel){const rec=r.recommended||r;L.polyline(rec.coords,{color:C[Z[id].level],weight:2,opacity:.5,dashArray:'2 6'}).addTo(G)}});
+ if(rt){
+  const rec=rt.recommended||rt;
+  const alt=rt.alternative;
+  if(alt){
+   L.polyline(alt.coords,{color:'#b5179e',weight:5,opacity:.85,dashArray:'8 8'}).addTo(G)
+    .bindTooltip(`<b>Alternative Route</b><br>${Z[sel].name} → ${alt.shelter_name}<br>${alt.km} km (${alt.eta_min} min) · ${alt.type}`);
+  }
+  L.polyline(rec.coords,{color:'#4cc9f0',weight:7,opacity:.9}).addTo(G)
+   .bindTooltip(`<b>Recommended Route (Lowest Risk)</b><br>${Z[sel].name} → ${rec.shelter_name}<br>${rec.km} km (${rec.eta_min} min)`);
+ }
+ const pin=(e,p,t,bad)=>L.marker([p.lat,p.lng],{icon:L.divIcon({html:`<div class="pin${bad?' bad':''}">${e}</div>`,className:'',iconSize:[24,24]})}).addTo(G).bindTooltip(t);
+ S.shelters.forEach(s=>pin('🏠',s,`<b>${s.name}</b><br>${s.safe?`${s.free} of ${s.cap} places free`:'<b>FLOODED – not usable</b>'}<br>Risk ${s.score}`,!s.safe));
+ S.hospitals.forEach(h=>pin('🏥',h,`<b>${h.name}</b>`));
+ panel(Z,rt);
+}
+function panel(Z,rt){
+ const s=S.summary,a=S.alerts;
+ $('alert').className=a.length?'on':'';
+ $('alert').textContent=a.length?`ALERT: ${a.length} zone(s) at or above ${S.alert_at} risk – ${a.map(x=>x.zone).join(', ')}`:'All zones below the alert level';
+ $('notes').innerHTML=S.notes.map(n=>`<li>${n}</li>`).join('');
+ $('kpis').innerHTML=[[s.high+s.medium,'zones affected'],[s.evacuees.toLocaleString(),'people to evacuate'],[s.assigned.toLocaleString(),'assigned to shelter'],[s.unplaced.toLocaleString(),'without a place'],[s.free_beds.toLocaleString(),'safe shelter places free'],[s.open_roads,'open roads'],[s.manually_blocked,'manually closed roads'],[s.flood_blocked,'flood-blocked roads']].map(([v,l])=>`<div><b>${v}</b><span>${l}</span></div>`).join('');
+ charts.c1.data.datasets[0].data=[s.high,s.medium,s.low];charts.c1.update('none');
+ charts.c2.data.labels=S.shelters.map(x=>x.id);charts.c2.data.datasets[0].data=S.shelters.map(x=>x.safe?Math.round(100*x.used/x.cap):100);charts.c2.data.datasets[0].backgroundColor=S.shelters.map(x=>x.safe?'#4cc9f0':'#ff5a4d');charts.c2.update('none');
+ const z=Z[sel],rec=rt&&(rt.recommended||rt),alt=rt&&rt.alternative;
+ let routeHtml='';
+ if(rec){
+  const sh_rec=S.shelters.find(x=>x.id===rec.shelter);
+  routeHtml+=`<div style="margin-bottom:8px;"><b style="color:#4cc9f0">Recommended Route (Lowest Risk):</b> ${z.name} → ${sh_rec?sh_rec.name:rec.shelter}<br>${rec.km} km · about ${rec.eta_min} min by convoy${rec.detour_km?` · <span style="color:var(--med)">+${rec.detour_km} km detour</span>`:''}<br><span style="color:var(--mute)">Via ${rec.via.join(' → ')}</span></div>`;
+  if(alt){
+   const sh_alt=S.shelters.find(x=>x.id===alt.shelter);
+   routeHtml+=`<div style="margin-bottom:8px;padding-top:6px;border-top:1px dashed var(--line);"><b style="color:#b5179e">Alternative Route:</b> ${z.name} → ${sh_alt?sh_alt.name:alt.shelter}<br>${alt.km} km · about ${alt.eta_min} min (${alt.type})<br><span style="color:var(--mute)">Via ${alt.via.join(' → ')}</span></div>`;
+  }else{
+   routeHtml+=`<div style="margin-bottom:8px;padding-top:6px;border-top:1px dashed var(--line);color:var(--mute);"><b style="color:#b5179e">Alternative Route:</b> No distinct valid alternative route on open roads.</div>`;
+  }
+  routeHtml+=`<div style="font-size:12px;border-top:1px solid var(--line);padding-top:6px;">Evacuation requirement: <b>${z.evac.toLocaleString()}</b> (Assigned: ${z.assigned.toLocaleString()}, Unplaced: ${z.unplaced.toLocaleString()})<br>Allocated: ${z.alloc.map(a=>a.people+' → '+a.shelter).join(', ')}${z.unplaced?` <b style="color:var(--high)">(${z.unplaced} unplaced)</b>`:''}<br>Nearest hospital: ${z.hospital?S.hospitals.find(h=>h.id===z.hospital.id).name+' ('+z.hospital.km+' km)':'<b style="color:var(--high)">unreachable</b>'}</div>`;
+ }else{
+  routeHtml=`<b>${z.name}</b>: ${z.evac?'<b style="color:var(--high)">no open route to a safe shelter</b>':'No evacuation required under lower predicted risk level'}.`;
+ }
+ $('route').innerHTML=routeHtml;
+ $('zt').innerHTML='<tr><th>Zone<th>Risk<th>Level<th>Evacuate</tr>'+[...S.zones].sort((x,y)=>y.score-x.score).map(z=>`<tr data-z="${z.id}" tabindex=0 class="${z.id===sel?'sel':''}"><td>${z.name}<td>${z.score}<td><span class=dot style="background:${C[z.level]}"></span>${z.level==='Low'?'Lower risk':z.level}<td>${z.evac}</tr>`).join('');
+ document.querySelectorAll('tr[data-z]').forEach(t=>{t.onclick=()=>{sel=t.dataset.z;draw()};t.onkeydown=e=>{if(e.key==='Enter'){sel=t.dataset.z;draw()}}});
+ $('zn').textContent=z.name;
+ const tot=Object.values(z.why).reduce((p,c)=>p+c,0)||1;
+ $('why').innerHTML=Object.entries(z.why).map(([k,v])=>`<div class=row><span>${k}</span><div class=bar style="width:${Math.max(2,100*v/.3)}%"></div><span>${(100*v/tot).toFixed(0)}%</span></div>`).join('')+`<div style="color:var(--mute);font-size:12px;margin-top:4px">Model feature importance: ${Object.entries(S.feature_importance).map(([k,v])=>k+' '+v).join(', ')}</div>`;
+ $('st').innerHTML='<tr><th>Shelter<th>Status<th>Free<th>Capacity</tr>'+S.shelters.map(x=>`<tr><td>${x.name}<td style="color:${x.safe?C.Low:C.High}">${x.safe?'Safe':'Flooded'}<td>${x.safe?x.free:0}<td>${x.cap}</tr>`).join('');
+ const mi=S.model_info||{};
+ $('ml-info').innerHTML=`<div class="ml-tag">SYNTHETIC DATASET MODEL</div><br><b>Architecture:</b> ${mi.type||'Random Forest Regressor'}<br><b>Data Origin:</b> <span style="color:var(--med)">${mi.data_source||'Synthetic Hydrology Data (6,000 samples)'}</span><br><b>Holdout Test R²:</b> ${mi.holdout_r2!==undefined?`<b>${mi.holdout_r2}</b> (Evaluated on 1,000-sample test set)`:'N/A'}<br><b>Feature Importances:</b> ${Object.entries(S.feature_importance||{}).map(([k,v])=>`${k}: ${(v*100).toFixed(1)}%`).join(' · ')}<br><div style="margin-top:6px;font-style:italic;color:#a0b4c0;border-top:1px dashed var(--line);padding-top:4px;">⚠️ <b>Real-World Accuracy Limitation:</b> ${mi.limitation_disclaimer||'Model trained on synthetic rule-based data. Synthetic test results do not establish real-world flood prediction accuracy.'}</div>`;
+ $('foot').textContent=`Prototype on synthetic hydrology data. Risk model: Random Forest Regressor (Hold-out R² ${S.holdout_r2}). Note: Synthetic test results do not establish real-world flood prediction accuracy.`;
+}
+['rain','thr'].forEach(i=>$(i).addEventListener('input',load));
+$('clear').onclick=()=>{manual.clear();load()};
+$('play').onclick=()=>{if(timer){clearInterval(timer);timer=null;$('play').textContent='▶ Storm time-lapse';return}
+ $('rain').value=.5;$('play').textContent='⏸ Pause';
+ timer=setInterval(()=>{let v=+$('rain').value+.03;if(v>2){clearInterval(timer);timer=null;$('play').textContent='▶ Storm time-lapse';return}$('rain').value=v;load()},500)};
+load();
+</script></body></html>
